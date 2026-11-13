@@ -931,6 +931,13 @@ function cleanMembers(members) {
   if (list.length > LIMITS.members) throw new HttpError(400, `Teams can have up to ${LIMITS.members} members.`);
   return list;
 }
+function cleanCaptain(captain, members) {
+  const name = cleanText(captain, LIMITS.member, "Team captain", { required: false });
+  if (!name) throw new HttpError(400, "Pick a team captain.");
+  const match = members.find((m) => m.toLowerCase() === name.toLowerCase());
+  if (!match) throw new HttpError(400, "The captain must be one of the team members.");
+  return match;
+}
 function cleanNumber(value, label) {
   if (value === "" || value === null || value === void 0) return null;
   const n = Number(value);
@@ -1069,13 +1076,14 @@ function createGame(store, env = {}) {
       if (route === "join") {
         const name = cleanText(body.name, LIMITS.teamName, "Team name");
         const members = cleanMembers(body.members);
+        const captain = cleanCaptain(body.captain, members);
         const token = randomBytes(16).toString("hex");
         const { result } = await mutate((g) => {
           if (!g.registrationOpen) throw new HttpError(403, "Registration is closed \u2014 ask the host.");
           if (g.teams.length >= LIMITS.teams) throw new HttpError(400, "This quiz is full.");
           if (g.teams.some((t) => t.name.toLowerCase() === name.toLowerCase()))
             throw new HttpError(409, "That team name is taken \u2014 get sillier!");
-          const team = { id: id(), name, members, token, joinedAt: now() };
+          const team = { id: id(), name, members, captain, token, joinedAt: now() };
           g.teams.push(team);
           return team;
         });
@@ -1087,6 +1095,8 @@ function createGame(store, env = {}) {
           const team = g.teams.find((t) => t.id === body.teamId);
           if (!team || !body.token || !safeEqual(team.token, body.token)) throw new HttpError(403, "You can only edit your own team.");
           team.members = members;
+          if (body.captain !== void 0) team.captain = cleanCaptain(body.captain, members);
+          else if (team.captain && !members.includes(team.captain)) team.captain = members[0];
         });
         return ok({ saved: true });
       }
