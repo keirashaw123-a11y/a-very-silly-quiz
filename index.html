@@ -223,6 +223,8 @@ textarea { resize: vertical; min-height: 90px; }
 .team-name { font-size: 21px; font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .you-tag { font-size: 11px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; background: var(--pink); color: #fff; border: 2px solid var(--ink); border-radius: 999px; padding: 2px 8px; }
 .team-members { font-size: 14px; color: var(--muted); margin-top: 3px; overflow-wrap: anywhere; }
+.team-captain { font-size: 14px; font-weight: 700; margin-top: 3px; overflow-wrap: anywhere; }
+.team-captain b { color: var(--ink, inherit); }
 .total { flex: none; text-align: right; }
 .total-num { font-family: var(--display); font-size: 36px; line-height: 1; }
 .total-lbl { font-size: 11px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); }
@@ -387,6 +389,8 @@ footer.foot a { color: var(--muted); }
         <label>Team members</label>
         <div id="members"></div>
         <button type="button" class="add-member" id="addMember">+ Add another player</button>
+        <label for="teamCaptain">Team captain 👑</label>
+        <select id="teamCaptain" required><option value="">Add your players first…</option></select>
         <div class="error" id="joinError"></div>
         <button class="btn big pink" type="submit" id="joinBtn">Let's get silly →</button>
       </form>
@@ -405,15 +409,17 @@ footer.foot a { color: var(--muted); }
           <div class="h2" id="myTeamName"></div>
           <div class="hint" id="myTeamRank" style="margin-top:2px;font-weight:700"></div>
         </div>
-        <button class="btn white sm" id="editBtn" type="button">✏️ Edit players</button>
+        <button class="btn white sm" id="editBtn" type="button">✏️ Edit team</button>
       </div>
       <form id="editForm" class="hidden" autocomplete="off">
         <label>Team members</label>
         <div id="editMembers"></div>
         <button type="button" class="add-member" id="addEditMember">+ Add another player</button>
+        <label for="editCaptain">Team captain 👑</label>
+        <select id="editCaptain" required></select>
         <div class="error" id="editError"></div>
         <div class="row" style="margin-top:14px">
-          <button class="btn mint grow" type="submit">Save players</button>
+          <button class="btn mint grow" type="submit">Save team</button>
           <button class="btn white" type="button" id="cancelEdit">Cancel</button>
         </div>
       </form>
@@ -536,6 +542,7 @@ const SQ = (() => {
           <div class="rank">${medal(r.rank)}</div>
           <div class="team-info">
             <div class="team-name">${esc(r.name)} ${mine ? '<span class="you-tag">You</span>' : ""}</div>
+            ${r.captain ? `<div class="team-captain">👑 Captain: <b>${esc(r.captain)}</b></div>` : ""}
             <div class="team-members">${r.members.map(esc).join(" · ")}${adjFlag}</div>
           </div>
           <div class="total"><div class="total-num" data-total="${r.total}">${fmt(r.total)}</div><div class="total-lbl">points</div></div>
@@ -666,8 +673,24 @@ const SQ = (() => {
     }
     const readMembers = (container) => [...container.querySelectorAll("input")].map((i) => i.value.trim()).filter(Boolean);
 
+    // ----- captain picker -----
+    function fillCaptain(selectEl, container, preferred) {
+      const names = [...new Set(readMembers(container))];
+      const current = preferred ?? selectEl.value;
+      selectEl.innerHTML = names.length
+        ? `<option value="">Choose your captain…</option>` + names.map((n) => `<option${n === current ? " selected" : ""}>${SQ.esc(n)}</option>`).join("")
+        : `<option value="">Add your players first…</option>`;
+    }
+    function watchCaptain(container, selectEl) {
+      const sync = () => fillCaptain(selectEl, container);
+      container.addEventListener("input", sync);
+      container.addEventListener("click", (e) => { if (e.target.closest("button")) setTimeout(sync); });
+    }
+
     const membersEl = $("#members");
     ["", ""].forEach(() => memberRow(membersEl));
+    const captainEl = $("#teamCaptain");
+    watchCaptain(membersEl, captainEl);
     $("#addMember").onclick = () => {
       if (membersEl.children.length >= 12) return toast("12 players max!");
       memberRow(membersEl).focus();
@@ -680,7 +703,7 @@ const SQ = (() => {
       $("#joinError").textContent = "";
       btn.disabled = true; btn.textContent = "Joining…";
       try {
-        const res = await api("join", { method: "POST", body: { name: $("#teamName").value, members: readMembers(membersEl) } });
+        const res = await api("join", { method: "POST", body: { name: $("#teamName").value, members: readMembers(membersEl), captain: captainEl.value } });
         me = { teamId: res.teamId, token: res.token };
         localStorage.setItem(KEY, JSON.stringify(me));
         confetti();
@@ -695,11 +718,14 @@ const SQ = (() => {
 
     // ----- edit -----
     const editMembers = $("#editMembers");
+    const editCaptain = $("#editCaptain");
+    watchCaptain(editMembers, editCaptain);
     $("#editBtn").onclick = () => {
       const team = state?.teams.find((t) => t.id === me?.teamId);
       if (!team) return;
       editMembers.innerHTML = "";
       team.members.forEach((m) => memberRow(editMembers, m));
+      fillCaptain(editCaptain, editMembers, team.captain || "");
       $("#editError").textContent = "";
       $("#editForm").classList.remove("hidden");
       $("#editBtn").classList.add("hidden");
@@ -713,8 +739,8 @@ const SQ = (() => {
     $("#editForm").onsubmit = async (e) => {
       e.preventDefault();
       try {
-        await api("team/update", { method: "POST", body: { ...me, members: readMembers(editMembers) } });
-        closeEdit(); toast("Players updated ✨"); live.force();
+        await api("team/update", { method: "POST", body: { ...me, members: readMembers(editMembers), captain: editCaptain.value } });
+        closeEdit(); toast("Team updated ✨"); live.force();
       } catch (err) { $("#editError").textContent = err.message; }
     };
 
